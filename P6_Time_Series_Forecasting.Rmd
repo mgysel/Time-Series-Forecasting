@@ -1,0 +1,345 @@
+---
+title: 'Project 6: Time Series Forecasting'
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+
+# Import Data
+## Import
+```{r}
+# Import data
+ms <- read.csv('data/monthly-sales-clean.csv')
+```
+## Convert Data to Time Series
+```{r}
+# Load dependencies
+library(PerformanceAnalytics)
+
+# Convert bookings_df to time series object
+ts_train <- ts(ms$monthly_sales, start=c(2008, 1), end=c(2013, 5), frequency=12)
+ts_full <- ts(ms$monthly_sales, start=c(2008, 1), end=c(2013, 9), frequency=12)
+plot(ts_full)
+```
+
+
+# Determine ETS Components
+```{r}
+# Fit time series decomposition
+fit <- stl(ts_train, s.window='period')
+# Plot
+plot(fit)
+```
+As the above time series decomposition plot shows, the time series displays:
+
+- Error: Multiplicative
+- Trend: Additive
+- Seasonality: Multiplicative
+
+
+# ETS Model
+## Build Model
+### Manual ETS Model
+```{r}
+# Load dependencies
+library(forecast)
+
+# Holt-Winters Seasonal Model
+fit_ets_manual <- ets(ts_train, model='MAM')
+plot(forecast(fit_ets_manual))
+```
+
+### Automated ETS Model
+```{r}
+# ETS Model with train dataset
+fit_ets_auto <- ets(ts_train)
+plot(forecast(fit_ets_auto))
+```
+
+## Forecast/Test Accuracy
+### Manual ETS Model
+```{r}
+# fit_ets is the model prediction
+# ts is the actual time series object
+accuracy(forecast(fit_ets_manual, 4), ts_full[66:69])
+
+# Plot accuracy
+# Fitted in Red
+plot(fit_ets_manual$fitted, col='red')
+# Actual in Blue
+lines(ts_full, col='blue')
+```
+
+### Automated ETS Model
+```{r}
+# fit_ets is the model prediction
+# ts is the actual time series object
+accuracy(forecast(fit_ets_auto, 4), ts_full[66:69])
+
+# Plot accuracy
+# Fitted in Red
+plot(fit_ets_auto$fitted, col='red')
+# Actual in Blue
+lines(ts_full, col='blue')
+```
+Both the manual and automated ets model, yield an MAPE of 9.326605%.
+
+# ARIMA Model
+## Build Model
+### Manual ARIMA Model
+#### Stationarize Dataset
+Plot the data to check if stationary
+```{r}
+# Plot data to check if constant mean/variance
+plot(ts_train)
+```
+The data is not stationary and is seasonal, so let's seasonally stationarize
+the data.
+```{r}
+# First Seasonal Difference
+ms$first_difference <- c(rep(NA,12), diff(ms$monthly_sales, lag=12))
+```
+Plot the data again, to check if stationary
+```{r}
+# Make first_difference time series
+ts_fd <- ts(ms$first_difference, start=c(2008, 1), end=c(2013, 5), frequency=12)
+
+# Plot first_difference
+plot(ts_fd)
+```
+The first_difference does not appear seasonal, but is still not stationary. 
+Let's take a second, non-seasonal difference.
+```{r}
+# Second, non-seasonal difference
+ms$second_difference <- c(NA, diff(ms$first_difference, lag=1))
+```
+Plot the data again, to check if stationary
+```{r}
+# Make first_difference time series
+ts_sd <- ts(ms$second_difference, start=c(2008, 1), end=c(2013, 5), frequency=12)
+
+# Plot first_difference
+plot(ts_sd)
+```
+Now, the time series displays a constant mean and variance, without any 
+seasonality.
+
+The model structure thus far, after taking a seasonal (D=1) difference and 
+non-seasonal difference (d=1) to stationarize the data, with a period of 12 is:
+- ARIMA(0,1,0)(0,1,0)[12]
+
+#### AR and MA Terms
+##### ACF Plot
+```{r}
+# Plot the ACF of second_difference
+ggAcf(ms$second_difference[1:65], lag.max=48)
+```
+##### PACF Plot
+```{r}
+# Plot the PACF of second_difference
+ggPacf(ms$second_difference[1:65], lag.max=48)
+```
+- The ACF and PACF have negative values at lag 1, suggesting a non-seasonal MA
+Term, signified as q=1. 
+- The ACF and PACF show little AC and PAC at the first seasonal lag, lag 12, 
+suggesting Q=0.
+
+Thus, the model structure after taking a non-seasonal MA Term (q=1) is:
+- ARIMA(0,1,1)(0,1,0)[12]
+
+#### Build Model
+```{r}
+# ARIMA Model
+fit_arima_manual <- Arima(ts_train, order=c(0,1,1), seasonal=c(0,1,0))
+plot(forecast(fit_arima_manual))
+```
+
+### Automated ARIMA Model
+```{r}
+# Build Auto Arima Model
+fit_arima_auto <- auto.arima(ts_train)
+fit_arima_auto
+```
+
+## Forecast/Test Accuracy
+### Manual ARIMA Model
+```{r}
+# fit_arima_auto is the model prediction
+# ts_full is the actual time series object
+accuracy(forecast(fit_arima_manual, 4), ts_full[66:69])
+
+# Plot accuracy
+# Fitted in Blue
+plot(forecast(fit_arima_manual))
+# Actual in Red
+lines(ts_full, col='red')
+```
+### Automated ARIMA Model
+```{r}
+# fit_arima_auto is the model prediction
+# ts_full is the actual time series object
+accuracy(forecast(fit_arima_auto, 4), ts_full[66:69])
+
+# Plot accuracy
+# Fitted in Blue
+plot(forecast(fit_arima_auto))
+# Actual in Red
+lines(ts_full, col='red')
+```
+The ARIMA Model (both manual and automated) yields an MAPE of 93.8%.
+
+# Choose Best Model
+
+The Holt-Winters Seasonal model yields the  highest accuracy.
+
+# Build ARIMA Model
+Build the Holt-Winters Seasonal Model with all data.
+```{r}
+# Holt-Winters Seasonal Model with all data
+fit_bm <- ets(ts_full, model='MAM')
+plot(forecast(fit_bm))
+```
+Predict the next 4 periods.
+```{r}
+# Holt-Winters Seasonal Model with all data
+forecast(fit_bm, 4)
+```
+
+The forecasts for the next 4 periods are:
+- Oct 2013: $747,868
+- Nov 2013: $805,244
+- Dec 2013: $578,736
+- Jan 2014: $573,014
+It is odd that December and January forecasts are lower than October and 
+November forecasts, but upon checking the data, this is consistent with 
+previous patterns.
+
+
+# Conclusions
+
+## Step 1: Plan Your Analysis
+### Time Series Criteria
+The dataset meets the time series dataset criteria because:
+- the data is continuous, with monthly sales values from January 2008 to 
+September 2013
+- the values are ordered
+- the values are equally spaced a month apart
+- there is only one value per each month
+### Holdout Sample
+Because we are attempting to predict four months in the future, we should use 
+monthly sales for the most recent four months as the holdout sample.
+
+## Step 2: Determine Trend, Seasonal, and Error Components
+Per the time series decomposition graph below:
+
+- Error: Multiplicative
+- Trend: Additive
+- Seasonality: Multiplicative
+
+```{r echo=FALSE}
+# Fit time series decomposition
+fit <- stl(ts_train, s.window='period')
+# Plot
+plot(fit)
+```
+
+## Step 3: Build Your Models
+### ETS Model
+#### Model Terms
+Per the time series decomposition graph, the model terms for ETS are additive 
+error, additive trend, and additive seasonality:
+- ETS(M,A,M)
+#### In-Sample Error
+Per the table of errors below:
+- Root Mean Square Error (RMSE) is 31,474.37
+- Mean Absolute Scaled Error (MASE) is 0.3528697
+- Mean Absolute Percentage Error (MAPE) is 10.3052
+```{r echo=FALSE}
+accuracy(forecast(fit_ets_manual))
+```
+
+### ARIMA Model
+#### Model Terms
+##### Differencing the Dataset
+Per the ACF and PACF graphs of time series data below, the large 
+auto-correlations and partial auto-correlations suggest the data must be 
+differenced both seasonally and non-seasonally, signified as d=1 for 
+non-seasonal differencing and D=1 for seasonal differencing.
+
+ACF Graph
+```{r echo=FALSE}
+# Plot the ACF of second_difference
+ggAcf(ts_train, lag.max=48)
+```
+PACF Graph
+```{r echo=FALSE}
+# Plot the PACF of second_difference
+ggPacf(ts_train, lag.max=48)
+```
+
+##### AR and MA Terms
+Per the ACF and PACF graphs of stationary data below: 
+
+- The ACF and PACF have negative values at lag 1, suggesting a non-seasonal MA
+Term, signified as q=1. 
+- The ACF and PACF show little AC and PAC at the first seasonal lag, lag 12, 
+suggesting no seasonal AR or MA Terms, signified as Q=0.
+
+ACF Graph
+```{r echo=FALSE}
+# Plot the ACF of second_difference
+ggAcf(ms$second_difference[1:65], lag.max=48)
+```
+PACF Graph
+```{r echo=FALSE}
+# Plot the PACF of second_difference
+ggPacf(ms$second_difference[1:65], lag.max=48)
+```
+
+Thus, the model structure is:
+
+- ARIMA(0,1,1)(0,1,0)[12]
+
+#### In-Sample Error
+Per the table of errors below:
+
+- Root Mean Square Error (RMSE) is 36,761.53
+- Mean Absolute Scaled Error (MASE) is 0.3646109
+- Mean Absolute Percentage Error (MAPE) is 9.824411
+```{r echo=FALSE}
+accuracy(forecast(fit_arima_manual))
+```
+
+## Step 4: 
+### Choose Best Model
+Per the table's of ETS and ARIMA Holdout Sample Error below, the ARIMA Model 
+displays a lower MAPE and MASE. As such, the ARIMA Model was used to forecast 
+the next four months of video game sales.
+
+ETS Holdout Sample Error
+```{r echo=FALSE}
+# fit_ets_manual is the model prediction
+# ts_full is the actual time series object
+accuracy(forecast(fit_ets_manual, 4), ts_full[66:69])
+```
+
+ARIMA Holdout Sample Error
+```{r echo=FALSE}
+# fit_arima_manual is the model prediction
+# ts_full is the actual time series object
+accuracy(forecast(fit_arima_manual, 4), ts_full[66:69])
+```
+
+### Forecast Results
+Per the table below, the forecasted monthly video game sales for the next four 
+months are:
+
+- Oct 2013: $747,868
+- Nov 2013: $805,244
+- Dec 2013: $578,736
+- Jan 2014: $573,014
+```{r echo=FALSE}
+# Holt-Winters Seasonal Model with all data
+forecast(fit_bm, 4)
+```
